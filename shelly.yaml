@@ -1,0 +1,135 @@
+substitutions:
+  device_name: shelly
+  device_description: "shelly"
+
+esphome:
+  name: ${device_name}
+  comment: ${device_description}
+  friendly_name: ${device_description}
+  # shelly 1
+  platform: ESP8266
+  board: esp01_1m
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "shelly Fallback Hotspot"
+    password: !secret ap_wifi_password
+
+captive_portal:
+    
+# Enable Web server (optional).
+web_server:
+  port: 80
+
+# Text sensors with general information.
+text_sensor:
+  # Expose ESPHome version as sensor.
+  - platform: version
+    name: ESPHome Version
+  # Expose WiFi information as sensors.
+  - platform: wifi_info
+    ip_address:
+      name: IP
+    ssid:
+      name: SSID
+    bssid:
+      name: BSSID
+
+# Sensors with general information.
+sensor:
+  # Uptime sensor.
+  - platform: uptime
+    name: Uptime
+
+  # WiFi Signal sensor.
+  - platform: wifi_signal
+    name: WiFi Signal
+    update_interval: 60s
+
+switch:
+  # Expose relay to HA Shelly OI contact
+  - platform: gpio
+    name: Relay
+    pin: 
+      number: GPIO4
+    id: shelly_relay
+    restore_mode: restore_default_off
+  # Switch to manually override
+  - platform: template
+    name: Manual override
+    id: manual
+    optimistic: True
+    turn_on_action:
+      - switch.turn_off: manualoff
+      - switch.turn_on: shelly_relay
+    turn_off_action:
+      - switch.turn_off: shelly_relay
+  # Switch to deactivate
+  - platform: template
+    name: Deactivate
+    id: manualoff
+    optimistic: True
+    turn_on_action:
+      - switch.turn_off: shelly_relay
+      - switch.turn_off: manual 
+      
+
+binary_sensor:
+  # PIR input Shelly SW contact
+  - platform: gpio
+    pin:
+      number: GPIO5
+    name: PIR
+    on_press: 
+      then:
+        script.execute: auto_off
+    id: button
+    
+
+number:
+  # Timer to define auto off min 15s as most none momentary contacts have minimum 10s as shortest interval
+  - platform: template
+    name: Timer
+    icon: mdi:timer
+    id: light_time
+    min_value: 15
+    max_value: 300
+    step: 15
+    mode: slider
+    restore_value: True
+    unit_of_measurement: "s"
+    optimistic: True
+
+script:
+  - id: auto_off
+    mode: restart
+    then:
+      - if:
+          condition:
+            and:
+              - switch.is_off: manual
+              - switch.is_off: manualoff
+          then:
+            - switch.turn_on: shelly_relay
+            - delay: !lambda 'return id(light_time).state * 1000;'
+            - if:
+                condition:
+                  - switch.is_off: manual
+                then:
+                  - switch.turn_off: shelly_relay
